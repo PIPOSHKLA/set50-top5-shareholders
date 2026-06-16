@@ -93,14 +93,12 @@ with left:
     default_companies = companies if show_all_companies else companies[:10]
     selected_companies = st.multiselect("เลือกบริษัท", companies, default=default_companies)
     max_rank = st.slider("อันดับผู้ถือหุ้น", 1, 5, 5)
-    include_nvdr = st.checkbox("รวม Thai NVDR", value=True)
 
 filtered = [
     row
     for row in rows
     if row["company_symbol"] in selected_companies
     and row["stakeholder_rank"] <= max_rank
-    and (include_nvdr or not row["is_thai_nvdr"])
 ]
 
 with right:
@@ -110,10 +108,8 @@ with right:
     col3.metric("Relationships", len(filtered))
 
     expected_relationships = len(selected_companies) * max_rank
-    if include_nvdr and len(filtered) == expected_relationships:
+    if len(filtered) == expected_relationships:
         st.success(f"ข้อมูลครบ: {len(selected_companies)} บริษัท x {max_rank} ผู้ถือหุ้น = {len(filtered)} ความสัมพันธ์")
-    elif not include_nvdr:
-        st.info("จำนวนความสัมพันธ์ลดลงเพราะปิดการแสดง Thai NVDR")
     else:
         st.warning(f"ข้อมูลที่แสดงมี {len(filtered)} จากที่คาด {expected_relationships} ความสัมพันธ์")
 
