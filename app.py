@@ -85,6 +85,33 @@ def make_detail_rows(rows, metrics):
     return details
 
 
+def connected_components(rows):
+    graph = {}
+    for row in rows:
+        company = row["company_symbol"]
+        stakeholder = row["stakeholder_name"]
+        graph.setdefault(company, set()).add(stakeholder)
+        graph.setdefault(stakeholder, set()).add(company)
+
+    components = []
+    seen = set()
+    for node in graph:
+        if node in seen:
+            continue
+        stack = [node]
+        component = set()
+        seen.add(node)
+        while stack:
+            current = stack.pop()
+            component.add(current)
+            for neighbor in graph[current]:
+                if neighbor not in seen:
+                    seen.add(neighbor)
+                    stack.append(neighbor)
+        components.append(component)
+    return sorted(components, key=len, reverse=True)
+
+
 def make_svg(rows, layout_mode):
     width = 1100
     height = 760
@@ -118,6 +145,35 @@ def make_svg(rows, layout_mode):
             angle = 2 * math.pi * slot / 5
             if stakeholder not in stakeholder_positions:
                 stakeholder_positions[stakeholder] = (x + 70 * math.cos(angle), y + 70 * math.sin(angle))
+    elif layout_mode == "กลุ่มตามความเชื่อมโยง":
+        components = connected_components(rows)
+        grid_cols = math.ceil(math.sqrt(max(1, len(components))))
+        grid_rows = math.ceil(len(components) / grid_cols)
+        cell_w = width / max(1, grid_cols)
+        cell_h = height / max(1, grid_rows)
+
+        for index, component in enumerate(components):
+            col = index % grid_cols
+            row_index = index // grid_cols
+            local_cx = cell_w * col + cell_w / 2
+            local_cy = cell_h * row_index + cell_h / 2
+            component_companies = sorted(node for node in component if node in companies)
+            component_stakeholders = sorted(node for node in component if node in stakeholders)
+            radius = max(45, min(cell_w, cell_h) * 0.32)
+
+            for i, company in enumerate(component_companies):
+                angle = 2 * math.pi * i / max(1, len(component_companies))
+                company_positions[company] = (
+                    local_cx + radius * 0.55 * math.cos(angle),
+                    local_cy + radius * 0.55 * math.sin(angle),
+                )
+
+            for i, stakeholder in enumerate(component_stakeholders):
+                angle = 2 * math.pi * i / max(1, len(component_stakeholders))
+                stakeholder_positions[stakeholder] = (
+                    local_cx + radius * math.cos(angle),
+                    local_cy + radius * math.sin(angle),
+                )
     else:
         for i, company in enumerate(companies):
             angle = 2 * math.pi * i / max(1, len(companies))
@@ -264,7 +320,7 @@ with left:
     )
     layout_mode = st.selectbox(
         "รูปแบบกราฟ",
-        ["วงแหวน 2 ชั้น", "Bipartite ซ้าย-ขวา", "กลุ่มตามบริษัท"],
+        ["วงแหวน 2 ชั้น", "Bipartite ซ้าย-ขวา", "กลุ่มตามบริษัท", "กลุ่มตามความเชื่อมโยง"],
     )
     if graph_mode == "เลือกบริษัท":
         selected_companies = st.multiselect("เลือกบริษัท", companies, default=companies[:10])
