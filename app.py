@@ -46,24 +46,46 @@ def make_svg(rows):
         stakeholder_positions[stakeholder] = (cx + 360 * math.cos(angle), cy + 360 * math.sin(angle))
 
     parts = [
+        '<div id="network-wrap">',
         f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
         '<rect width="100%" height="100%" fill="#0f172a" rx="18"/>',
-        '<style>text{font-family:Arial,sans-serif;font-size:11px;fill:#e5e7eb}.small{font-size:9px;fill:#cbd5e1}</style>',
+        """
+        <style>
+        text{font-family:Arial,sans-serif;font-size:11px;fill:#e5e7eb;pointer-events:none}
+        .small{font-size:9px;fill:#cbd5e1;opacity:.7}
+        .node{cursor:pointer;transition:opacity .15s ease,transform .15s ease}
+        .node circle{stroke:#e5e7eb;stroke-width:0;transition:stroke-width .15s ease,filter .15s ease}
+        .edge{transition:opacity .15s ease,stroke .15s ease,stroke-width .15s ease;pointer-events:stroke}
+        .dim{opacity:.12}
+        .focus circle{stroke-width:3;filter:drop-shadow(0 0 7px #f8fafc)}
+        .focus text{font-weight:700;opacity:1}
+        .active-edge{stroke:#f8fafc;stroke-opacity:.95!important;stroke-width:5!important}
+        </style>
+        """,
     ]
 
     for row in rows:
+        company = row["company_symbol"]
+        stakeholder = row["stakeholder_name"]
         x1, y1 = company_positions[row["company_symbol"]]
         x2, y2 = stakeholder_positions[row["stakeholder_name"]]
         stroke_width = max(1, min(8, row["percent_share"] / 8))
         title = html.escape(f'{row["company_symbol"]} -> {row["stakeholder_name"]}: {row["percent_share"]:.2f}%')
+        source = html.escape(company, quote=True)
+        target = html.escape(stakeholder, quote=True)
         parts.append(
-            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'<line class="edge" data-source="{source}" data-target="{target}" '
+            f'x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
             f'stroke="#64748b" stroke-opacity="0.45" stroke-width="{stroke_width:.1f}"><title>{title}</title></line>'
         )
 
     for company, (x, y) in company_positions.items():
+        node = html.escape(company, quote=True)
+        label = html.escape(company)
+        parts.append(f'<g class="node company" data-node="{node}">')
         parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="15" fill="#38bdf8"/>')
-        parts.append(f'<text x="{x + 18:.1f}" y="{y + 4:.1f}">{html.escape(company)}</text>')
+        parts.append(f'<text x="{x + 18:.1f}" y="{y + 4:.1f}">{label}</text>')
+        parts.append('</g>')
 
     for stakeholder, (x, y) in stakeholder_positions.items():
         related = [row for row in rows if row["stakeholder_name"] == stakeholder]
@@ -72,10 +94,72 @@ def make_svg(rows):
         radius = max(6, min(20, 6 + total_percent / 8))
         color = "#a78bfa" if is_nvdr else "#f59e0b"
         label = stakeholder if len(stakeholder) <= 34 else stakeholder[:31] + "..."
+        node = html.escape(stakeholder, quote=True)
+        title = html.escape(stakeholder)
+        parts.append(f'<g class="node stakeholder" data-node="{node}">')
+        parts.append(f'<title>{title}</title>')
         parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}"/>')
         parts.append(f'<text class="small" x="{x + radius + 4:.1f}" y="{y + 3:.1f}">{html.escape(label)}</text>')
+        parts.append('</g>')
 
     parts.append('</svg>')
+    parts.append(
+        """
+        <script>
+        const root = document.currentScript.parentElement;
+        const nodes = [...root.querySelectorAll('.node')];
+        const edges = [...root.querySelectorAll('.edge')];
+        let lockedNode = null;
+
+        function clearHighlight() {
+          nodes.forEach(node => node.classList.remove('dim', 'focus'));
+          edges.forEach(edge => edge.classList.remove('dim', 'active-edge'));
+        }
+
+        function highlight(name) {
+          const related = new Set([name]);
+          edges.forEach(edge => {
+            if (edge.dataset.source === name || edge.dataset.target === name) {
+              related.add(edge.dataset.source);
+              related.add(edge.dataset.target);
+              edge.classList.add('active-edge');
+              edge.classList.remove('dim');
+            } else {
+              edge.classList.remove('active-edge');
+              edge.classList.add('dim');
+            }
+          });
+          nodes.forEach(node => {
+            if (related.has(node.dataset.node)) {
+              node.classList.add('focus');
+              node.classList.remove('dim');
+            } else {
+              node.classList.remove('focus');
+              node.classList.add('dim');
+            }
+          });
+        }
+
+        nodes.forEach(node => {
+          node.addEventListener('mouseenter', () => {
+            if (!lockedNode) highlight(node.dataset.node);
+          });
+          node.addEventListener('mouseleave', () => {
+            if (!lockedNode) clearHighlight();
+          });
+          node.addEventListener('click', () => {
+            lockedNode = lockedNode === node.dataset.node ? null : node.dataset.node;
+            lockedNode ? highlight(lockedNode) : clearHighlight();
+          });
+        });
+        root.addEventListener('dblclick', () => {
+          lockedNode = null;
+          clearHighlight();
+        });
+        </script>
+        </div>
+        """
+    )
     return "".join(parts)
 
 
