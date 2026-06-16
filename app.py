@@ -257,7 +257,7 @@ left, right = st.columns([1, 3])
 
 with left:
     st.subheader("Filters")
-        graph_mode = st.radio(
+    graph_mode = st.radio(
         "เลือกมุมมองกราฟ",
         ["SET50 ทั้งหมด", "เลือกบริษัท", "เลือกผู้ถือหุ้น"],
         index=0,
