@@ -89,7 +89,9 @@ left, right = st.columns([1, 3])
 
 with left:
     st.subheader("Filters")
-    selected_companies = st.multiselect("เลือกบริษัท", companies, default=companies[:10])
+    show_all_companies = st.checkbox("แสดงครบทั้ง SET50", value=True)
+    default_companies = companies if show_all_companies else companies[:10]
+    selected_companies = st.multiselect("เลือกบริษัท", companies, default=default_companies)
     max_rank = st.slider("อันดับผู้ถือหุ้น", 1, 5, 5)
     include_nvdr = st.checkbox("รวม Thai NVDR", value=True)
 
@@ -107,6 +109,14 @@ with right:
     col2.metric("Stakeholders", len({row["stakeholder_name"] for row in filtered}))
     col3.metric("Relationships", len(filtered))
 
+    expected_relationships = len(selected_companies) * max_rank
+    if include_nvdr and len(filtered) == expected_relationships:
+        st.success(f"ข้อมูลครบ: {len(selected_companies)} บริษัท x {max_rank} ผู้ถือหุ้น = {len(filtered)} ความสัมพันธ์")
+    elif not include_nvdr:
+        st.info("จำนวนความสัมพันธ์ลดลงเพราะปิดการแสดง Thai NVDR")
+    else:
+        st.warning(f"ข้อมูลที่แสดงมี {len(filtered)} จากที่คาด {expected_relationships} ความสัมพันธ์")
+
     if filtered:
         components.html(make_svg(filtered), height=780, scrolling=True)
     else:
@@ -114,3 +124,16 @@ with right:
 
 st.subheader("Data")
 st.dataframe(filtered, use_container_width=True, hide_index=True)
+
+with st.expander("ตรวจจำนวนผู้ถือหุ้นต่อบริษัท"):
+    counts = []
+    for company in companies:
+        company_rows = [row for row in rows if row["company_symbol"] == company]
+        counts.append(
+            {
+                "company_symbol": company,
+                "holder_count": len(company_rows),
+                "status": "ครบ 5" if len(company_rows) == 5 else "ไม่ครบ",
+            }
+        )
+    st.dataframe(counts, use_container_width=True, hide_index=True)
