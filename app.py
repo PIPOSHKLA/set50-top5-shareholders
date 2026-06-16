@@ -1,63 +1,86 @@
-import pandas as pd
+import csv
+import html
+import math
+from pathlib import Path
+
 import streamlit as st
 import streamlit.components.v1 as components
-from pyvis.network import Network
 
 
 st.set_page_config(
     page_title="HW1Napob | SET50 Shareholder Network",
-    page_icon="📊",
     layout="wide",
 )
 
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
-    df = pd.read_csv("set50_top5_shareholders.csv")
-    df["percent_share"] = pd.to_numeric(df["percent_share"], errors="coerce")
-    df["shares"] = pd.to_numeric(df["shares"], errors="coerce")
-    df["stakeholder_rank"] = pd.to_numeric(df["stakeholder_rank"], errors="coerce")
-    return df
+def load_rows():
+    rows = []
+    with Path("set50_top5_shareholders.csv").open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            row["stakeholder_rank"] = int(row["stakeholder_rank"])
+            row["percent_share"] = float(row["percent_share"])
+            row["shares"] = int(float(row["shares"]))
+            row["is_thai_nvdr"] = row["is_thai_nvdr"].lower() == "true"
+            rows.append(row)
+    return rows
 
 
-def build_network(df: pd.DataFrame) -> str:
-    net = Network(height="720px", width="100%", bgcolor="#0f172a", font_color="#e5e7eb")
-    net.barnes_hut(gravity=-25000, central_gravity=0.15, spring_length=160, spring_strength=0.04)
+def make_svg(rows):
+    width = 1100
+    height = 760
+    cx = width / 2
+    cy = height / 2
 
-    for _, row in df.iterrows():
-        company = row["company_symbol"]
-        shareholder = row["stakeholder_name"]
-        percent = row["percent_share"]
-        rank = int(row["stakeholder_rank"])
+    companies = sorted({row["company_symbol"] for row in rows})
+    stakeholders = sorted({row["stakeholder_name"] for row in rows})
+    company_positions = {}
+    stakeholder_positions = {}
 
-        net.add_node(
-            company,
-            label=company,
-            title=row["company_name_th"],
-            color="#38bdf8",
-            shape="dot",
-            size=24,
+    for i, company in enumerate(companies):
+        angle = 2 * math.pi * i / max(1, len(companies))
+        company_positions[company] = (cx + 260 * math.cos(angle), cy + 260 * math.sin(angle))
+
+    for i, stakeholder in enumerate(stakeholders):
+        angle = 2 * math.pi * i / max(1, len(stakeholders))
+        stakeholder_positions[stakeholder] = (cx + 360 * math.cos(angle), cy + 360 * math.sin(angle))
+
+    parts = [
+        f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
+        '<rect width="100%" height="100%" fill="#0f172a" rx="18"/>',
+        '<style>text{font-family:Arial,sans-serif;font-size:11px;fill:#e5e7eb}.small{font-size:9px;fill:#cbd5e1}</style>',
+    ]
+
+    for row in rows:
+        x1, y1 = company_positions[row["company_symbol"]]
+        x2, y2 = stakeholder_positions[row["stakeholder_name"]]
+        stroke_width = max(1, min(8, row["percent_share"] / 8))
+        title = html.escape(f'{row["company_symbol"]} -> {row["stakeholder_name"]}: {row["percent_share"]:.2f}%')
+        parts.append(
+            f'<line x1="{x1:.1f}" y1="{y1:.1f}" x2="{x2:.1f}" y2="{y2:.1f}" '
+            f'stroke="#64748b" stroke-opacity="0.45" stroke-width="{stroke_width:.1f}"><title>{title}</title></line>'
         )
-        net.add_node(
-            shareholder,
-            label=shareholder,
-            title=f"ผู้ถือหุ้นอันดับ {rank}",
-            color="#f59e0b" if not row["is_thai_nvdr"] else "#a78bfa",
-            shape="dot",
-            size=max(10, min(38, 10 + percent)),
-        )
-        net.add_edge(
-            company,
-            shareholder,
-            value=max(1, percent),
-            title=f"{company} -> {shareholder}: {percent:.2f}%",
-            color="#94a3b8",
-        )
 
-    return net.generate_html(notebook=False)
+    for company, (x, y) in company_positions.items():
+        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="15" fill="#38bdf8"/>')
+        parts.append(f'<text x="{x + 18:.1f}" y="{y + 4:.1f}">{html.escape(company)}</text>')
+
+    for stakeholder, (x, y) in stakeholder_positions.items():
+        related = [row for row in rows if row["stakeholder_name"] == stakeholder]
+        total_percent = sum(row["percent_share"] for row in related)
+        is_nvdr = any(row["is_thai_nvdr"] for row in related)
+        radius = max(6, min(20, 6 + total_percent / 8))
+        color = "#a78bfa" if is_nvdr else "#f59e0b"
+        label = stakeholder if len(stakeholder) <= 34 else stakeholder[:31] + "..."
+        parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" fill="{color}"/>')
+        parts.append(f'<text class="small" x="{x + radius + 4:.1f}" y="{y + 3:.1f}">{html.escape(label)}</text>')
+
+    parts.append('</svg>')
+    return "".join(parts)
 
 
-df = load_data()
+rows = load_rows()
+companies = sorted({row["company_symbol"] for row in rows})
 
 st.title("SET50 Top 5 Shareholders Network")
 st.caption("HW1Napob | Data from SET major shareholder pages")
@@ -66,31 +89,28 @@ left, right = st.columns([1, 3])
 
 with left:
     st.subheader("Filters")
-    companies = sorted(df["company_symbol"].unique())
-    selected_companies = st.multiselect(
-        "เลือกบริษัท",
-        companies,
-        default=companies[:10],
-        help="เลือกน้อยลงถ้าต้องการให้กราฟอ่านง่ายขึ้น",
-    )
+    selected_companies = st.multiselect("เลือกบริษัท", companies, default=companies[:10])
     max_rank = st.slider("อันดับผู้ถือหุ้น", 1, 5, 5)
     include_nvdr = st.checkbox("รวม Thai NVDR", value=True)
 
-filtered = df[df["company_symbol"].isin(selected_companies)]
-filtered = filtered[filtered["stakeholder_rank"] <= max_rank]
-if not include_nvdr:
-    filtered = filtered[~filtered["is_thai_nvdr"]]
+filtered = [
+    row
+    for row in rows
+    if row["company_symbol"] in selected_companies
+    and row["stakeholder_rank"] <= max_rank
+    and (include_nvdr or not row["is_thai_nvdr"])
+]
 
 with right:
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Companies", filtered["company_symbol"].nunique())
-    c2.metric("Stakeholders", filtered["stakeholder_name"].nunique())
-    c3.metric("Relationships", len(filtered))
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Companies", len({row["company_symbol"] for row in filtered}))
+    col2.metric("Stakeholders", len({row["stakeholder_name"] for row in filtered}))
+    col3.metric("Relationships", len(filtered))
 
-    if filtered.empty:
-        st.warning("ไม่มีข้อมูลตาม filter ที่เลือก")
+    if filtered:
+        components.html(make_svg(filtered), height=780, scrolling=True)
     else:
-        components.html(build_network(filtered), height=760, scrolling=True)
+        st.warning("ไม่มีข้อมูลตาม filter ที่เลือก")
 
 st.subheader("Data")
 st.dataframe(filtered, use_container_width=True, hide_index=True)
