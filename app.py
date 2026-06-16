@@ -26,6 +26,65 @@ def load_rows():
     return rows
 
 
+@st.cache_data
+def load_metrics():
+    metrics = {}
+    path = Path("company_metrics.csv")
+    if not path.exists():
+        return metrics
+
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        for row in csv.DictReader(file):
+            metrics[row["company_symbol"]] = row
+    return metrics
+
+
+def to_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def format_number(value):
+    number = to_float(value)
+    if number is None:
+        return "-"
+    return f"{number:,.2f}"
+
+
+def format_int(value):
+    try:
+        return f"{int(float(value)):,}"
+    except (TypeError, ValueError):
+        return "-"
+
+
+def make_detail_rows(rows, metrics):
+    details = []
+    for row in rows:
+        metric = metrics.get(row["company_symbol"], {})
+        details.append(
+            {
+                "ตัวย่อ": row["company_symbol"],
+                "ชื่อบริษัท": row["company_name_th"],
+                "ชื่ออังกฤษ": row["company_name_en"],
+                "หมวดธุรกิจ": metric.get("sector", "-"),
+                "อุตสาหกรรม": metric.get("industry", "-"),
+                "ราคาล่าสุด": format_number(metric.get("last_price")),
+                "สูงสุด 52W": format_number(metric.get("high_52w")),
+                "ต่ำสุด 52W": format_number(metric.get("low_52w")),
+                "อันดับผู้ถือหุ้น": row["stakeholder_rank"],
+                "ผู้ถือหุ้น": row["stakeholder_name"],
+                "จำนวนหุ้น": format_int(row["shares"]),
+                "% ถือหุ้น": f'{row["percent_share"]:.2f}',
+                "วันข้อมูลผู้ถือหุ้น": row["book_close_date"],
+                "แหล่งข้อมูล": row["source_url"],
+            }
+        )
+    return details
+
+
 def make_svg(rows):
     width = 1100
     height = 760
@@ -164,7 +223,9 @@ def make_svg(rows):
 
 
 rows = load_rows()
+metrics = load_metrics()
 companies = sorted({row["company_symbol"] for row in rows})
+stakeholders = sorted({row["stakeholder_name"] for row in rows})
 
 st.title("SET50 Top 5 Shareholders Network")
 st.caption("HW1Napob | Data from SET major shareholder pages")
@@ -173,17 +234,40 @@ left, right = st.columns([1, 3])
 
 with left:
     st.subheader("Filters")
-    show_all_companies = st.checkbox("แสดงครบทั้ง SET50", value=True)
-    default_companies = companies if show_all_companies else companies[:10]
-    selected_companies = st.multiselect("เลือกบริษัท", companies, default=default_companies)
+    graph_mode = st.radio(
+        "เลือกมุมมองกราฟ",
+        ["SET50 ทั้งหมด", "เลือกบริษัท", "เลือกผู้ถือหุ้น"],
+        index=0,
+    )
+    if graph_mode == "เลือกบริษัท":
+        selected_companies = st.multiselect("เลือกบริษัท", companies, default=companies[:10])
+        selected_stakeholder = None
+    elif graph_mode == "เลือกผู้ถือหุ้น":
+        selected_stakeholder = st.selectbox("เลือกผู้ถือหุ้น", stakeholders)
+        selected_companies = companies
+    else:
+        selected_companies = companies
+        selected_stakeholder = None
+
     max_rank = st.slider("อันดับผู้ถือหุ้น", 1, 5, 5)
+    table_search = st.text_input("ค้นหาในตาราง", "")
 
 filtered = [
     row
     for row in rows
     if row["company_symbol"] in selected_companies
     and row["stakeholder_rank"] <= max_rank
+    and (selected_stakeholder is None or row["stakeholder_name"] == selected_stakeholder)
 ]
+detail_rows = make_detail_rows(filtered, metrics)
+
+if table_search:
+    search = table_search.strip().lower()
+    detail_rows = [
+        row
+        for row in detail_rows
+        if any(search in str(value).lower() for value in row.values())
+    ]
 
 with right:
     col1, col2, col3 = st.columns(3)
@@ -191,19 +275,22 @@ with right:
     col2.metric("Stakeholders", len({row["stakeholder_name"] for row in filtered}))
     col3.metric("Relationships", len(filtered))
 
-    expected_relationships = len(selected_companies) * max_rank
-    if len(filtered) == expected_relationships:
-        st.success(f"ข้อมูลครบ: {len(selected_companies)} บริษัท x {max_rank} ผู้ถือหุ้น = {len(filtered)} ความสัมพันธ์")
+    if graph_mode == "SET50 ทั้งหมด" and len(filtered) == len(companies) * max_rank:
+        st.success(f"ข้อมูลครบ: {len(companies)} บริษัท x {max_rank} ผู้ถือหุ้น = {len(filtered)} ความสัมพันธ์")
+    elif graph_mode == "เลือกบริษัท":
+        st.info(f"กำลังแสดง {len({row['company_symbol'] for row in filtered})} บริษัท และ {len(filtered)} ความสัมพันธ์")
+    elif graph_mode == "เลือกผู้ถือหุ้น":
+        st.info(f"{selected_stakeholder} เกี่ยวข้องกับ {len({row['company_symbol'] for row in filtered})} บริษัทในข้อมูลที่เลือก")
     else:
-        st.warning(f"ข้อมูลที่แสดงมี {len(filtered)} จากที่คาด {expected_relationships} ความสัมพันธ์")
+        st.warning("ข้อมูลที่แสดงไม่ครบตาม filter ที่เลือก")
 
     if filtered:
         components.html(make_svg(filtered), height=780, scrolling=True)
     else:
         st.warning("ไม่มีข้อมูลตาม filter ที่เลือก")
 
-st.subheader("Data")
-st.dataframe(filtered, use_container_width=True, hide_index=True)
+st.subheader("Detailed Data")
+st.dataframe(detail_rows, use_container_width=True, hide_index=True)
 
 with st.expander("ตรวจจำนวนผู้ถือหุ้นต่อบริษัท"):
     counts = []
