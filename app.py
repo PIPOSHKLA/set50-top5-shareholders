@@ -85,7 +85,7 @@ def make_detail_rows(rows, metrics):
     return details
 
 
-def make_svg(rows):
+def make_svg(rows, layout_mode):
     width = 1100
     height = 760
     cx = width / 2
@@ -96,13 +96,36 @@ def make_svg(rows):
     company_positions = {}
     stakeholder_positions = {}
 
-    for i, company in enumerate(companies):
-        angle = 2 * math.pi * i / max(1, len(companies))
-        company_positions[company] = (cx + 260 * math.cos(angle), cy + 260 * math.sin(angle))
+    if layout_mode == "Bipartite ซ้าย-ขวา":
+        for i, company in enumerate(companies):
+            y = 80 + (height - 160) * i / max(1, len(companies) - 1)
+            company_positions[company] = (220, y)
+        for i, stakeholder in enumerate(stakeholders):
+            y = 60 + (height - 120) * i / max(1, len(stakeholders) - 1)
+            stakeholder_positions[stakeholder] = (760, y)
+    elif layout_mode == "กลุ่มตามบริษัท":
+        for i, company in enumerate(companies):
+            angle = 2 * math.pi * i / max(1, len(companies))
+            company_positions[company] = (cx + 285 * math.cos(angle), cy + 285 * math.sin(angle))
 
-    for i, stakeholder in enumerate(stakeholders):
-        angle = 2 * math.pi * i / max(1, len(stakeholders))
-        stakeholder_positions[stakeholder] = (cx + 360 * math.cos(angle), cy + 360 * math.sin(angle))
+        used_slots = {}
+        for row in rows:
+            company = row["company_symbol"]
+            stakeholder = row["stakeholder_name"]
+            slot = used_slots.get(company, 0)
+            used_slots[company] = slot + 1
+            x, y = company_positions[company]
+            angle = 2 * math.pi * slot / 5
+            if stakeholder not in stakeholder_positions:
+                stakeholder_positions[stakeholder] = (x + 70 * math.cos(angle), y + 70 * math.sin(angle))
+    else:
+        for i, company in enumerate(companies):
+            angle = 2 * math.pi * i / max(1, len(companies))
+            company_positions[company] = (cx + 260 * math.cos(angle), cy + 260 * math.sin(angle))
+
+        for i, stakeholder in enumerate(stakeholders):
+            angle = 2 * math.pi * i / max(1, len(stakeholders))
+            stakeholder_positions[stakeholder] = (cx + 360 * math.cos(angle), cy + 360 * math.sin(angle))
 
     parts = [
         '<div id="network-wrap">',
@@ -234,10 +257,14 @@ left, right = st.columns([1, 3])
 
 with left:
     st.subheader("Filters")
-    graph_mode = st.radio(
+        graph_mode = st.radio(
         "เลือกมุมมองกราฟ",
         ["SET50 ทั้งหมด", "เลือกบริษัท", "เลือกผู้ถือหุ้น"],
         index=0,
+    )
+    layout_mode = st.selectbox(
+        "รูปแบบกราฟ",
+        ["วงแหวน 2 ชั้น", "Bipartite ซ้าย-ขวา", "กลุ่มตามบริษัท"],
     )
     if graph_mode == "เลือกบริษัท":
         selected_companies = st.multiselect("เลือกบริษัท", companies, default=companies[:10])
@@ -285,7 +312,7 @@ with right:
         st.warning("ข้อมูลที่แสดงไม่ครบตาม filter ที่เลือก")
 
     if filtered:
-        components.html(make_svg(filtered), height=780, scrolling=True)
+        components.html(make_svg(filtered, layout_mode), height=780, scrolling=True)
     else:
         st.warning("ไม่มีข้อมูลตาม filter ที่เลือก")
 
