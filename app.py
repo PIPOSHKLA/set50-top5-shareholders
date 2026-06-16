@@ -185,10 +185,24 @@ def make_svg(rows, layout_mode):
 
     parts = [
         '<div id="network-wrap">',
+        """
+        <div class="zoom-controls">
+          <button type="button" data-zoom="in">+</button>
+          <button type="button" data-zoom="out">-</button>
+          <button type="button" data-zoom="reset">Reset</button>
+          <span>Scroll = zoom, drag = pan</span>
+        </div>
+        """,
         f'<svg viewBox="0 0 {width} {height}" xmlns="http://www.w3.org/2000/svg">',
         '<rect width="100%" height="100%" fill="#0f172a" rx="18"/>',
         """
         <style>
+        #network-wrap{position:relative;background:#0f172a;border-radius:18px;overflow:hidden}
+        .zoom-controls{position:absolute;z-index:10;top:12px;left:12px;display:flex;gap:6px;align-items:center;background:rgba(15,23,42,.82);border:1px solid #334155;border-radius:10px;padding:7px 8px;color:#cbd5e1;font-family:Arial,sans-serif;font-size:12px}
+        .zoom-controls button{background:#1e293b;color:#e5e7eb;border:1px solid #475569;border-radius:7px;padding:4px 9px;cursor:pointer;font-weight:700}
+        .zoom-controls button:hover{background:#334155}
+        svg{cursor:grab;touch-action:none}
+        svg.dragging{cursor:grabbing}
         text{font-family:Arial,sans-serif;font-size:11px;fill:#e5e7eb;pointer-events:none}
         .small{font-size:9px;fill:#cbd5e1;opacity:.7}
         .node{cursor:pointer;transition:opacity .15s ease,transform .15s ease}
@@ -200,6 +214,7 @@ def make_svg(rows, layout_mode):
         .active-edge{stroke:#f8fafc;stroke-opacity:.95!important;stroke-width:5!important}
         </style>
         """,
+        '<g id="viewport">',
     ]
 
     for row in rows:
@@ -240,14 +255,42 @@ def make_svg(rows, layout_mode):
         parts.append(f'<text class="small" x="{x + radius + 4:.1f}" y="{y + 3:.1f}">{html.escape(label)}</text>')
         parts.append('</g>')
 
+    parts.append('</g>')
     parts.append('</svg>')
     parts.append(
         """
         <script>
         const root = document.currentScript.parentElement;
+        const svg = root.querySelector('svg');
+        const viewport = root.querySelector('#viewport');
         const nodes = [...root.querySelectorAll('.node')];
         const edges = [...root.querySelectorAll('.edge')];
+        const zoomButtons = [...root.querySelectorAll('[data-zoom]')];
         let lockedNode = null;
+        let scale = 1;
+        let panX = 0;
+        let panY = 0;
+        let dragging = false;
+        let dragStart = {x: 0, y: 0, panX: 0, panY: 0};
+
+        function applyTransform() {
+          viewport.setAttribute('transform', `translate(${panX} ${panY}) scale(${scale})`);
+        }
+
+        function setZoom(nextScale, centerX = 550, centerY = 380) {
+          const oldScale = scale;
+          scale = Math.max(0.35, Math.min(5, nextScale));
+          panX = centerX - (centerX - panX) * (scale / oldScale);
+          panY = centerY - (centerY - panY) * (scale / oldScale);
+          applyTransform();
+        }
+
+        function clientToSvgPoint(event) {
+          const pt = svg.createSVGPoint();
+          pt.x = event.clientX;
+          pt.y = event.clientY;
+          return pt.matrixTransform(svg.getScreenCTM().inverse());
+        }
 
         function clearHighlight() {
           nodes.forEach(node => node.classList.remove('dim', 'focus'));
@@ -289,6 +332,50 @@ def make_svg(rows, layout_mode):
             lockedNode = lockedNode === node.dataset.node ? null : node.dataset.node;
             lockedNode ? highlight(lockedNode) : clearHighlight();
           });
+        });
+        zoomButtons.forEach(button => {
+          button.addEventListener('click', () => {
+            const action = button.dataset.zoom;
+            if (action === 'in') setZoom(scale * 1.2);
+            if (action === 'out') setZoom(scale / 1.2);
+            if (action === 'reset') {
+              scale = 1;
+              panX = 0;
+              panY = 0;
+              applyTransform();
+            }
+          });
+        });
+        svg.addEventListener('wheel', event => {
+          event.preventDefault();
+          const point = clientToSvgPoint(event);
+          const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+          setZoom(scale * zoomFactor, point.x, point.y);
+        }, {passive: false});
+        svg.addEventListener('pointerdown', event => {
+          if (event.target.closest('.node')) return;
+          dragging = true;
+          svg.classList.add('dragging');
+          svg.setPointerCapture(event.pointerId);
+          dragStart = {x: event.clientX, y: event.clientY, panX, panY};
+        });
+        svg.addEventListener('pointermove', event => {
+          if (!dragging) return;
+          const rect = svg.getBoundingClientRect();
+          const scaleX = 1100 / rect.width;
+          const scaleY = 760 / rect.height;
+          panX = dragStart.panX + (event.clientX - dragStart.x) * scaleX;
+          panY = dragStart.panY + (event.clientY - dragStart.y) * scaleY;
+          applyTransform();
+        });
+        svg.addEventListener('pointerup', event => {
+          dragging = false;
+          svg.classList.remove('dragging');
+          try { svg.releasePointerCapture(event.pointerId); } catch (error) {}
+        });
+        svg.addEventListener('pointerleave', () => {
+          dragging = false;
+          svg.classList.remove('dragging');
         });
         root.addEventListener('dblclick', () => {
           lockedNode = null;
